@@ -1,4 +1,4 @@
-const User = require("../models/user");
+const {User} = require("../models/user");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
@@ -10,23 +10,23 @@ function generateOTP() {
 
 // ================== SIGN UP ==================
 async function handleAuthSignUp(req, res) {
-  const { username, email, password, first_name, last_name } = req.body;
+  const { name, email, password, phone, role } = req.body;
 
   try {
-    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
+    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
     if (existingUser) {
-      return res.status(400).json({ message: "Email or username already in use" });
+      return res.status(400).json({ message: "Email or Phone already in use" });
     }
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const newUser = new User({
-      username,
+      name,
       email,
       password: hashedPassword,
-      first_name,
-      last_name,
+      phone,
+      role:"user",
     });
 
     await newUser.save();
@@ -41,10 +41,9 @@ async function handleAuthSignUp(req, res) {
       token,
       user: {
         id: newUser._id,
-        username: newUser.username,
+        name: newUser.name,
         email: newUser.email,
-        first_name: newUser.first_name,
-        last_name: newUser.last_name,
+        phone: newUser.phone,
         role: newUser.role,
       },
     });
@@ -84,10 +83,10 @@ async function handleAuthLogin(req, res) {
       token,
       user: {
         id: user._id,
-        username: user.username,
+        name: user.name,
         email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
+        phone: user.phone,
+        role: user.role,
         role: user.role,
       },
     });
