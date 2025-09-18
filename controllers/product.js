@@ -1,3 +1,4 @@
+// controllers/product.js
 const { Product, Variant, Image } = require("../models/product");
 const slugify = require("slugify");
 
@@ -18,7 +19,7 @@ async function handleGetAllProducts(req, res) {
 // Create a new product
 async function handleCreateNewProduct(req, res) {
   try {
-    const {
+    let {
       title,
       description,
       price,
@@ -27,58 +28,87 @@ async function handleCreateNewProduct(req, res) {
       handle,
       status,
       tags = [],
-      images = [],
       variants = [],
     } = req.body;
 
+    // ✅ Normalize tags
     if (typeof tags === "string") {
       try {
-        tags = JSON.parse(tags);
+        tags = JSON.parse(tags.replace(/'/g, '"'));
+        if (!Array.isArray(tags)) {
+          return res.status(400).json({ msg: "Tags must be an array" });
+        }
       } catch (error) {
-        return res
-          .status(400)
-          .json({ msg: "Invalid tags format", error: error });
+        return res.status(400).json({ msg: "Invalid tags format" });
       }
     }
 
-    // Required fields validation
-    if (!title || !price || !vendor || !product_type || !handle || !status) {
+    // ✅ Normalize variants
+    if (typeof variants === "string") {
+      try {
+        variants = JSON.parse(variants.replace(/'/g, '"'));
+        if (!Array.isArray(variants)) {
+          return res.status(400).json({ msg: "Variants must be an array" });
+        }
+      } catch (error) {
+        return res.status(400).json({ msg: "Invalid variants format" });
+      }
+    }
+
+    // ✅ Required fields validation
+    if (!title || !price || !vendor || !product_type || !status) {
       return res.status(400).json({
-        msg: "title, price, vendor, product_type, handle, and status are required",
+        msg: "title, price, vendor, product_type, and status are required",
       });
     }
 
-    // Step 1: create Images (if provided)
-    const imageDocs = await Image.insertMany(images || []);
-    const imageIds = imageDocs.map((img) => img._id);
+    // ✅ Slugify handle
+    const baseHandle = slugify(title, { lower: true, strict: true });
 
-    // Step 2: create Variants (if provided)
-    const variantDocs = await Variant.insertMany(variants || []);
-    const variantIds = variantDocs.map((v) => v._id);
-
-    const baseHandle = title
-      .toLowerCase()
-      .replace(/[^\w\s-]/g, "")
-      .trim()
-      .replace(/\s+/g, "-");
-
+    // ✅ Check if product exists
     const existingProduct = await Product.findOne({
       $or: [{ handle: baseHandle }, { title }],
     });
     if (existingProduct) {
-      return res.status(200).json({
+      return res.status(409).json({
         msg: "Product already exists",
-        post: {
-          id: existingPost._id,
-          slug: existingPost.handle,
-          title: existingPost.title,
-          status: existingPost.status,
-          createdAt: existingPost.createdAt,
-        },
+        product: existingProduct,
       });
     }
-    // Step 3: create Product
-    const newProduct = await Product({
+
+    // ✅ Step 1: Save Images (multiple)
+    let imageIds = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const imageDoc = new Image({
+          src: file.path, // Cloudinary URL
+          alt: title,
+        });
+        await imageDoc.save();
+        imageIds.push(imageDoc._id);
+      }
+    }
+
+    // ✅ Step 2: Create Variants
+    const variantDocs = await Variant.insertMany(
+      variants.map((v) => ({
+        title: v.title,
+        sku: v.sku || `${baseHandle}-${Date.now()}`,
+        price: v.price || price,
+        compare_at_price: v.compare_at_price || null,
+        inventory_quantity: v.inventory_quantity || 0,
+        weight: v.weight || null,
+        barcode: v.barcode || null,
+        requires_shipping:
+          typeof v.requires_shipping === "boolean"
+            ? v.requires_shipping
+            : true,
+      }))
+    );
+    const variantIds = variantDocs.map((v) => v._id);
+
+    // ✅ Step 3: Create Product
+    const newProduct = new Product({
       title,
       description,
       price,
@@ -90,16 +120,25 @@ async function handleCreateNewProduct(req, res) {
       images: imageIds,
       variants: variantIds,
     });
-    const product = await newProduct.save();
+    await newProduct.save();
+
+    // ✅ Step 4: Return populated product
+    const savedProduct = await Product.findById(newProduct._id)
+      .populate("images")
+      .populate("variants");
 
     return res.status(201).json({
       msg: "Product created successfully!",
-      product,
+      product: savedProduct,
     });
   } catch (error) {
-    return res
-      .status(500)
-      .json({ msg: "Internal Server Error", error: error.message });
+    if (error.code === 11000) {
+      return res.status(409).json({ msg: "Duplicate field value", error });
+    }
+    return res.status(500).json({
+      msg: "Internal Server Error",
+      error: error.message,
+    });
   }
 }
 

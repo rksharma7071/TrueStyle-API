@@ -20,7 +20,8 @@ app.use(cors());
 app.get("/", (req, res) => {
   const apiRoutes = {
     "/users": "User related operations",
-    "/auth": "Login related operations"
+    "/auth": "Login related operations",
+    "/product": "Product related operations"
   };
 
   res.json({
